@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 
 from core.services.review_service import (
+    _run_rag_retrieval_generation,
     create_review,
     get_review,
     list_reviews,
@@ -377,3 +378,35 @@ class TestReviewService:
 
         # Should order by created_at descending
         mock_db_session.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_rag_generation_surfaces_failed_tool_result(self, mock_profile):
+        """Test a failed tool result recorded by the orchestrator appears in review sections."""
+        error_message = "forced tool failure for issue 16"
+        agent_output = {
+            "tool_results": {
+                "github_tool": {"error": error_message, "success": False},
+                "market_analyzer": {"status": "ok"},
+            }
+        }
+
+        result = await _run_rag_retrieval_generation(mock_profile, [], agent_output)
+
+        section_text = [f"{s['section_name']} {s['content']}" for s in result["sections"]]
+        assert any("github_tool" in text and error_message in text for text in section_text)
+
+    @pytest.mark.asyncio
+    async def test_rag_generation_without_tool_failures_adds_no_failure_section(self, mock_profile):
+        """Test successful tool results leave the existing review sections and score unchanged."""
+        baseline = await _run_rag_retrieval_generation(mock_profile, [], {})
+        agent_output = {"tool_results": {"market_analyzer": {"status": "ok"}}}
+
+        result = await _run_rag_retrieval_generation(mock_profile, [], agent_output)
+
+        assert result["sections"] == baseline["sections"]
+        assert result["overall_score"] == baseline["overall_score"]
+        assert [s["section_name"] for s in result["sections"]] == [
+            "Technical Skills",
+            "Project Experience",
+            "Career Growth",
+        ]

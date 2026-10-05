@@ -321,7 +321,7 @@ async def _run_rag_retrieval_generation(
     # 3. Retrieve relevant context
     # 4. Generate detailed feedback using LLM
 
-    return {
+    review_output = {
         "sections": [
             {
                 "section_name": "Technical Skills",
@@ -352,6 +352,38 @@ async def _run_rag_retrieval_generation(
             },
         ],
         "overall_score": 0.81,
+    }
+
+    failure_section = _build_tool_failure_section(agent_output)
+    if failure_section:
+        review_output["sections"].append(failure_section)
+
+    return review_output
+
+
+def _build_tool_failure_section(agent_output: dict) -> dict | None:
+    """
+    Build a review section listing tool calls the orchestrator recorded as failed.
+    Returns None when no tool failures were recorded.
+    """
+    tool_results = agent_output.get("tool_results") if isinstance(agent_output, dict) else None
+    if not isinstance(tool_results, dict):
+        return None
+
+    failures = [
+        f"{tool_name}: {result['error']}"
+        for tool_name, result in tool_results.items()
+        if isinstance(result, dict) and result.get("success") is False and result.get("error")
+    ]
+    if not failures:
+        return None
+
+    return {
+        "section_name": "Tool Failures",
+        "content": "Some analysis tools failed, so this review may be incomplete.\n"
+        + "\n".join(failures),
+        "confidence": 1.0,
+        "suggestions": [],
     }
 
 
